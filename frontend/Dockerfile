@@ -18,7 +18,7 @@ COPY package*.json ./
 # Устанавливаем зависимости
 RUN npm install
 
-RUN npm install -g typescript
+RUN npm install --save-dev typescript
 # Копируем все файлы из текущей директории в контейнер
 COPY . .
 
