@@ -1,5 +1,6 @@
 import random
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.db.models import Prefetch, Count, Q
 from rest_framework.views import APIView
@@ -113,6 +114,8 @@ class RecommendedCoursesSkillView(APIView):
         на основе открытого навыка. РАНДОМНО."""
 
         skill = get_object_or_404(Skill, id=pk)
+        if skill.editable:
+            return Response({})
         user_courses = request.user.courses.all()
 
         courses = Course.objects.prefetch_related("skills").exclude(
@@ -146,9 +149,17 @@ class SkillsView(APIView):
             name=skill_name, editable=False
         ).exists()
 
-        skill, created = Skill.objects.get_or_create(
-            name=skill_name, defaults={"editable": is_custom_skill}
-        )
+        if is_custom_skill:
+            if request.user.user_skills.filter(name=skill_name):
+                return Response(
+                    {"Навык уже есть"}, status=status.HTTP_400_BAD_REQUEST
+                )
+            skill = Skill.objects.create(
+                name=skill_name, editable=is_custom_skill
+            )
+        else:
+            skill = get_object_or_404(Skill, name=skill_name)
+
         user_skill_data = {
             "editable": is_custom_skill,
             "rate": 0,
@@ -173,23 +184,23 @@ class UpdateDeleteSkillsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
-        """Изменение скилла пользователя, уровень оценки или заметка."""
+        """Изменение скилла пользователя, уровня оценки или заметки."""
+
         user_skill = get_object_or_404(
             UserSkill.objects.select_related("skill"), id=pk
         )
+
+        name = request.data.pop("name", None)
+        if name is not None and user_skill.skill.editable is True:
+            user_skill.skill.name = name
+            user_skill.skill.save()
+
         serializer = PatchUserSkillSerializer(
             user_skill, data=request.data, partial=True
         )
         if serializer.is_valid():
             serializer.save()
-        user_skill = {
-            "id": user_skill.id,
-            "name": get_object_or_404(Skill, id=user_skill.skill_id).name,
-            "rate": user_skill.rate,
-            "notes": user_skill.notes,
-            "editable": user_skill.editable,
-        }
-        return Response(user_skill)
+        return Response(serializer.data)
 
     def delete(self, request, pk):
         """Удаление скилла пользователя."""
@@ -197,8 +208,10 @@ class UpdateDeleteSkillsView(APIView):
             UserSkill.objects.select_related("skill"), id=pk
         )
 
-        # Удаление объекта без atomic.transaction()
-        user_skill.delete()
+        with transaction.atomic():
+            skill_to_delete = user_skill.skill
+            user_skill.delete()
+            skill_to_delete.delete()
 
         data = {
             "id": pk,
