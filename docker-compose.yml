@@ -31,7 +31,7 @@ services:
      - "8000:8000"
 
   gateway:
-    build: ./gateway/
+    build: lexxar91/taski_gateway:latest
     # А тут подключаем volume со статикой к gateway
     volumes:
       - static:/staticfiles/
